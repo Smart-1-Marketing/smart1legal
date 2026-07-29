@@ -3,8 +3,9 @@
 A self-contained lead-gen web app for **Smart 1 Marketing's "Smart Signage" Legal
 Conquesting Package**. A law firm fills out a short intake form; the app uses OpenAI
 to build a Digital Out-of-Home (DOOH) + mobile-retargeting market plan tailored to the
-firm's practice area and ZIP code, renders a branded proposal PDF, and pushes the lead
-+ opportunity into Smart1Suite (HighLevel) via webhook.
+firm's practice area and ZIP code, renders a branded proposal PDF (**`legal-conquesting-report`**)
+stored in **Cloudinary**, and pushes the lead + opportunity + report URL into GoHighLevel
+via the **`GHL_WEBHOOK_URL`** webhook.
 
 This is the legal sibling of the Boat Dealer (`smart1boat`) and RV Dealer (`smart1rv`)
 apps — same architecture, tuned for law firms.
@@ -43,8 +44,16 @@ one and may not invent prices.
 
 - `GET /` — intake form UI (`templates/index.html`)
 - `POST /api/analyze` — `{firm_name, website, firm_zip, practice_area, target_radius,
-  primary_goal, secondary_practice_areas, contact_*, notes}` → `{ok, report, report_pdf_url}`
+  primary_goal, secondary_practice_areas, contact_*, notes}` →
+  `{ok, report, report_name, report_pdf_url, report_pdf_download_url}`
 - `GET /health` — health check
+
+## Report storage & delivery
+
+The proposal PDF is named **`legal-conquesting-report`**, stored in **Cloudinary** under a
+`legal-conquesting-report/` folder (unique per submission), and delivered with a
+`legal-conquesting-report.pdf` download filename. The webhook payload includes
+`report_name`, `report_pdf_url`, `report_pdf_download_url`, and `report_pdf_public_id`.
 
 ## Environment variables
 
@@ -52,8 +61,8 @@ one and may not invent prices.
 |---|---|---|
 | `OPENAI_API_KEY` | yes | OpenAI key |
 | `OPENAI_MODEL` | no | defaults to `gpt-4.1-mini` |
-| `SMART1_WEBHOOK_URL` | no | Smart1Suite / HighLevel inbound webhook. If unset, lead push is skipped. |
-| `PUBLIC_BASE_URL` | no | e.g. `https://smart1legal.onrender.com` — makes the PDF URL absolute. |
+| `GHL_WEBHOOK_URL` | yes | GoHighLevel inbound webhook the lead + report is posted to. If unset, lead push is skipped. |
+| `CLOUDINARY_URL` | yes* | `cloudinary://<api_key>:<api_secret>@<cloud_name>` — stores the PDF. *If unset, the lead still posts; the PDF just isn't hosted. |
 | `ENABLE_PDF` | no | `1` (default) / `0` to disable PDF generation. |
 
 ## Run locally
@@ -61,16 +70,20 @@ one and may not invent prices.
 ```bash
 pip install -r requirements.txt
 export OPENAI_API_KEY=sk-...
+export GHL_WEBHOOK_URL=https://...
+export CLOUDINARY_URL=cloudinary://key:secret@cloud
 python app.py         # http://localhost:5000
 ```
 
 ## Deploy (Render)
 
 `render.yaml` is included. Create a new Blueprint from this repo, set `OPENAI_API_KEY`,
-`SMART1_WEBHOOK_URL`, and `PUBLIC_BASE_URL` in the dashboard, and deploy. Runs on the
-native Python runtime (reportlab is pure-Python — no Docker/apt needed).
+`GHL_WEBHOOK_URL`, and `CLOUDINARY_URL` in the dashboard, and deploy. Runs on the native
+Python runtime (reportlab is pure-Python — no Docker/apt needed).
 
 ## Notes
 
 - All figures are labeled AI planning estimates, never audited counts.
-- PDF/webhook failures are guarded so they never block the lead from being captured.
+- PDF/Cloudinary/webhook failures are guarded so they never block the lead from being captured.
+- Your Cloudinary account must allow PDF delivery (Settings → Security → "Allow delivery of
+  PDF and ZIP files") for the hosted report URL to open in a browser.

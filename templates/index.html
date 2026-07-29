@@ -87,6 +87,18 @@
     .spinner{display:inline-block;width:16px;height:16px;border:2px solid #cdd6e6;border-top-color:var(--blue);
       border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle;margin-right:8px}
     @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* Animated SVG loader */
+    .loader{padding:26px 26px 30px;text-align:center}
+    .loader .stage{max-width:420px;margin:0 auto}
+    .loader .cap{margin-top:14px;font-weight:700;color:var(--navy);font-size:15px;min-height:20px}
+    .loader .cap .dots::after{content:"";animation:dots 1.4s steps(4,end) infinite}
+    @keyframes dots{0%{content:""}25%{content:"."}50%{content:".."}75%{content:"..."}100%{content:""}}
+    .loader .track{max-width:420px;margin:14px auto 0;height:6px;border-radius:6px;background:var(--mist);overflow:hidden}
+    .loader .track > i{display:block;height:100%;width:40%;border-radius:6px;
+      background:linear-gradient(90deg,var(--gold),var(--gold-2));animation:load 2.4s ease-in-out infinite}
+    @keyframes load{0%{margin-left:-40%}100%{margin-left:100%}}
+    .loader .sub{margin-top:10px;color:var(--muted);font-size:12px}
     .err{color:#a11;background:#fdecec;border:1px solid #f4caca;padding:12px 14px;border-radius:9px;font-size:13.5px}
     .result{display:none;padding:0 26px 26px}
     .result.show{display:block}
@@ -100,6 +112,27 @@
     .chip{background:#fff;border:1px solid var(--line);border-radius:999px;padding:5px 12px;font-size:12px;color:var(--navy)}
     .pkg{background:var(--navy);color:#fff;border-radius:10px;padding:14px 16px;margin:12px 0}
     .pkg b{color:var(--gold-2)}
+    .hiw-title{font-size:13px;font-weight:800;color:var(--navy);text-transform:uppercase;letter-spacing:.05em;margin:16px 0 9px}
+    .hiw{display:grid;gap:8px}
+    .hiw-step{display:flex;gap:11px;align-items:flex-start;background:#fff;border:1px solid var(--line);
+      border-radius:10px;padding:11px 13px}
+    .hiw-n{flex:0 0 24px;width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,var(--gold),var(--gold-2));
+      color:#231a06;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center}
+    .hiw-step b{display:block;color:var(--navy);font-size:13.5px;margin-bottom:2px}
+    .hiw-step span{font-size:12.5px;color:var(--muted);line-height:1.4}
+    .outs{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .out{display:flex;gap:8px;align-items:flex-start;background:#f0f9f4;border:1px solid #cbe8d6;border-radius:9px;
+      padding:10px 12px;font-size:12.5px;color:var(--navy)}
+    .out span{color:#3ba776;font-weight:800}
+    .adv{background:#fff;border:1px solid var(--line);border-left:3px solid var(--gold);border-radius:8px;padding:10px 12px}
+    .adv b{display:block;color:var(--navy);font-size:13px;margin-bottom:2px}
+    .adv span{font-size:12px;color:var(--muted);line-height:1.4}
+    .net{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+    .net-card{background:var(--navy);border-radius:10px;padding:12px 13px;color:#fff}
+    .net-fmt{font-weight:800;font-size:12.5px;color:var(--gold-2);margin-bottom:5px}
+    .net-v{font-size:12px;color:#e7edf6;line-height:1.4;margin-bottom:7px}
+    .net-when{font-size:11px;color:#a9b8d4;font-weight:600}
+    @media(max-width:560px){.outs,.net{grid-template-columns:1fr}}
     .dl{display:inline-block;margin-top:12px;background:var(--navy);color:#fff;text-decoration:none;
       padding:11px 18px;border-radius:9px;font-weight:700;font-size:14px}
     footer{text-align:center;color:#9fb0cd;font-size:12px;margin-top:24px}
@@ -111,8 +144,9 @@
     <header>
       <div class="eyebrow">Smart 1 Marketing</div>
       <h1>Legal Conquesting Market Plan</h1>
-      <p>Digital Out-of-Home “Smart Signage,” high-intent geofencing, and mobile retargeting —
-        built to drive high-intent legal leads instead of paying for empty billboard impressions.</p>
+      <p>Every screen format — highway boards, transit, gyms, waiting rooms, gas pumps — activated
+        <i>only</i> when context makes it relevant, then bridged to the prospect's phone. The leg up
+        static billboards can't give you.</p>
     </header>
 
     <div class="card">
@@ -360,6 +394,81 @@
     function fmt(n){ return (n==null)?'—':Number(n).toLocaleString('en-US'); }
     function rng(a,b){ return fmt(a)+'–'+fmt(b); }
 
+    // ---- Animated SVG loader ----
+    const LOADER_SVG = `
+      <svg class="stage" viewBox="0 0 420 150" width="100%" xmlns="http://www.w3.org/2000/svg" aria-label="Building your plan">
+        <!-- radar rings from the screen -->
+        <g fill="none" stroke="#28477F" stroke-width="2">
+          <circle cx="78" cy="64" r="10" opacity="0">
+            <animate attributeName="r" values="10;46" dur="2.2s" repeatCount="indefinite"/>
+            <animate attributeName="opacity" values="0.5;0" dur="2.2s" repeatCount="indefinite"/>
+          </circle>
+          <circle cx="78" cy="64" r="10" opacity="0">
+            <animate attributeName="r" values="10;46" dur="2.2s" begin="1.1s" repeatCount="indefinite"/>
+            <animate attributeName="opacity" values="0.5;0" dur="2.2s" begin="1.1s" repeatCount="indefinite"/>
+          </circle>
+        </g>
+        <!-- billboard pole -->
+        <rect x="74" y="86" width="8" height="46" fill="#c3ccdc"/>
+        <!-- billboard screen -->
+        <rect x="40" y="34" width="76" height="52" rx="6" fill="#1A2E58"/>
+        <rect x="47" y="41" width="62" height="38" rx="3" fill="#28477F"/>
+        <rect x="52" y="47" width="34" height="6" rx="3" fill="#d1a542">
+          <animate attributeName="opacity" values="1;0.35;1" dur="1.4s" repeatCount="indefinite"/>
+        </rect>
+        <rect x="52" y="57" width="52" height="4" rx="2" fill="#8ea1c4"/>
+        <rect x="52" y="65" width="44" height="4" rx="2" fill="#8ea1c4"/>
+        <!-- connecting path -->
+        <path id="bridge" d="M118,60 C186,18 250,120 316,74" fill="none" stroke="#d9dfea" stroke-width="2" stroke-dasharray="4 5"/>
+        <!-- traveling signal dot -->
+        <circle r="6" fill="#B8892B">
+          <animateMotion dur="1.8s" repeatCount="indefinite" keyPoints="0;1" keyTimes="0;1" calcMode="ease">
+            <mpath href="#bridge"/>
+          </animateMotion>
+          <animate attributeName="opacity" values="0;1;1;0" dur="1.8s" repeatCount="indefinite"/>
+        </circle>
+        <!-- phone -->
+        <rect x="300" y="40" width="54" height="80" rx="9" fill="#1A2E58"/>
+        <rect x="306" y="48" width="42" height="60" rx="3" fill="#eaf0f8"/>
+        <circle cx="327" cy="114" r="3" fill="#8ea1c4"/>
+        <!-- phone glow pulse -->
+        <rect x="300" y="40" width="54" height="80" rx="9" fill="none" stroke="#3ba776" stroke-width="2" opacity="0">
+          <animate attributeName="opacity" values="0;0.9;0" dur="1.8s" begin="0.9s" repeatCount="indefinite"/>
+        </rect>
+        <!-- tiny incoming-ad lines on the phone -->
+        <rect x="312" y="56" width="30" height="5" rx="2" fill="#B8892B">
+          <animate attributeName="opacity" values="0;1" dur="1.8s" begin="0.9s" repeatCount="indefinite"/>
+        </rect>
+        <rect x="312" y="66" width="24" height="4" rx="2" fill="#c3ccdc"/>
+        <rect x="312" y="74" width="28" height="4" rx="2" fill="#c3ccdc"/>
+      </svg>`;
+
+    const LOADER_CAPS = [
+      "Mapping your market",
+      "Locating high-intent screens",
+      "Layering in-market intent data",
+      "Building the mobile retargeting bridge",
+      "Assembling your month-by-month plan",
+      "Finalizing your proposal"
+    ];
+    let capTimer = null;
+    function startLoader(){
+      statusEl.className='status show';
+      statusEl.innerHTML =
+        '<div class="loader">'+ LOADER_SVG +
+        '<div class="cap" id="loadCap">'+ LOADER_CAPS[0] +'<span class="dots"></span></div>'+
+        '<div class="track"><i></i></div>'+
+        '<div class="sub">Analyzing your ZIP, radius, and local high-intent locations…</div>'+
+        '</div>';
+      let idx = 0;
+      const capEl = document.getElementById('loadCap');
+      capTimer = setInterval(()=>{
+        idx = (idx+1) % LOADER_CAPS.length;
+        if(capEl) capEl.innerHTML = LOADER_CAPS[idx] + '<span class="dots"></span>';
+      }, 2600);
+    }
+    function stopLoader(){ if(capTimer){ clearInterval(capTimer); capTimer=null; } }
+
     form.addEventListener('submit', async (e)=>{
       e.preventDefault();
       if(!validateStep(3)) return;
@@ -368,8 +477,7 @@
       document.getElementById('secondaryAreas').value = Array.from(secondary).join(', ');
 
       resultEl.classList.remove('show'); resultInner.innerHTML='';
-      statusEl.className='status show';
-      statusEl.innerHTML='<span class="spinner"></span> Building your DOOH + mobile conquesting plan…';
+      startLoader();
       submitBtn.disabled=true; backBtn.disabled=true;
 
       const data = Object.fromEntries(new FormData(form).entries());
@@ -388,6 +496,7 @@
         statusEl.className='status show';
         statusEl.innerHTML='<div class="err">'+ (err.message||'Request failed.') +'</div>';
       } finally {
+        stopLoader();
         submitBtn.disabled=false; backBtn.disabled=false;
       }
     });
@@ -410,6 +519,46 @@
       '</div>';
       html += '<div class="pkg"><b>'+ (rp.monthly_investment||'') +' — '+ (rp.package_name||'') +'</b><br>'+
               '<span style="font-size:13px;color:#c8d2e6">'+ (rp.description||'') +'</span></div>';
+
+      // Why DOOH beats a static billboard — advantages
+      const advs = r.dooh_advantages||[];
+      if(advs.length){
+        html += '<div class="hiw-title">Why DOOH beats a static billboard</div><div class="outs">';
+        advs.forEach(a=>{ html += '<div class="adv"><b>'+(a.title||'')+'</b><span>'+(a.detail||'')+'</span></div>'; });
+        html += '</div>';
+      }
+
+      // The full screen network — every board, only when it works
+      const net = r.screen_network||[];
+      if(net.length){
+        html += '<div class="hiw-title">The full screen network — every board, only when it works</div><div class="net">';
+        net.forEach(n=>{
+          html += '<div class="net-card"><div class="net-fmt">'+(n.format||'')+'</div>'+
+                  '<div class="net-v">'+(n.venues||'')+'</div>'+
+                  '<div class="net-when">⚡ '+(n.when_it_runs||'')+'</div></div>';
+        });
+        html += '</div>';
+      }
+
+      // How it works — numbered steps
+      const steps = r.how_it_works||[];
+      if(steps.length){
+        html += '<div class="hiw-title">How your campaign works</div><div class="hiw">';
+        steps.forEach((s,i)=>{
+          html += '<div class="hiw-step"><span class="hiw-n">'+(i+1)+'</span><div><b>'+
+                  (s.title||'')+'</b><span>'+(s.detail||'')+'</span></div></div>';
+        });
+        html += '</div>';
+      }
+
+      // What to expect — outcomes
+      const outs = r.expected_outcomes||[];
+      if(outs.length){
+        html += '<div class="hiw-title">What to expect</div><div class="outs">';
+        outs.forEach(o=>{ html += '<div class="out"><span>✓</span>'+o+'</div>'; });
+        html += '</div>';
+      }
+
       html += '<div class="chips">'+chans+'</div>';
       if (json.report_pdf_url){
         html += '<a class="dl" href="'+json.report_pdf_url+'" target="_blank" rel="noopener">⬇ Download Full Proposal PDF</a>';
