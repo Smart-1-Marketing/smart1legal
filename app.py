@@ -36,12 +36,8 @@ ENABLE_PDF = os.getenv("ENABLE_PDF", "1").strip() not in ("0", "false", "False",
 
 # Standardized report name — every generated PDF is stored in Cloudinary under this.
 REPORT_NAME = "legal-conquesting-report"
-
-# Cloudinary is configured automatically from the CLOUDINARY_URL environment variable
-# (format: cloudinary://<api_key>:<api_secret>@<cloud_name>).
-import cloudinary
-import cloudinary.uploader
-cloudinary.config(secure=True)
+# NOTE: Cloudinary is imported lazily inside upload_pdf_to_cloudinary() (never at module
+# import) so a missing or misformatted CLOUDINARY_URL can never crash app startup.
 
 # ---------------------------------------------------------------------------
 # Smart 1 "Smart Signage" Legal Conquesting package menu. The model must choose
@@ -919,12 +915,27 @@ def upload_pdf_to_cloudinary(pdf_bytes: bytes, firm: str):
     """Upload the proposal PDF to Cloudinary and return {url, download_url, public_id}, or None.
 
     Stored under the "legal-conquesting-report/" folder with a unique per-firm id, and
-    delivered with a "legal-conquesting-report.pdf" attachment filename. Returns None if
-    CLOUDINARY_URL is not configured or the upload fails (never blocks the webhook/lead)."""
-    if not pdf_bytes or not os.getenv("CLOUDINARY_URL"):
+    delivered with a "legal-conquesting-report.pdf" attachment filename. Cloudinary is
+    imported lazily here (never at module import) so a missing/misformatted CLOUDINARY_URL
+    can never crash startup. Returns None if the URL isn't a valid cloudinary:// URL or the
+    upload fails — the lead/webhook is never blocked."""
+    if not pdf_bytes:
         return None
-    public_id = f"{REPORT_NAME}/{_slug(firm)}-{int(time.time())}"
+    cloud_url = os.getenv("CLOUDINARY_URL", "").strip().strip('"').strip("'")
+    if not cloud_url.startswith("cloudinary://"):
+        if cloud_url:
+            app.logger.warning(
+                "CLOUDINARY_URL is set but is not a valid 'cloudinary://<key>:<secret>@<cloud>' "
+                "URL; skipping PDF upload."
+            )
+        return None
+    # Normalize (strip stray quotes/whitespace) so the cloudinary SDK parses it cleanly.
+    os.environ["CLOUDINARY_URL"] = cloud_url
     try:
+        import cloudinary
+        import cloudinary.uploader
+        cloudinary.config(secure=True)
+        public_id = f"{REPORT_NAME}/{_slug(firm)}-{int(time.time())}"
         result = cloudinary.uploader.upload(
             io.BytesIO(pdf_bytes),
             resource_type="image",   # Cloudinary handles PDFs as image assets
