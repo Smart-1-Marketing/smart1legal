@@ -64,6 +64,18 @@ The proposal PDF is named **`legal-conquesting-report`**, stored in **Cloudinary
 | `GHL_WEBHOOK_URL` | yes | GoHighLevel inbound webhook the lead + report is posted to. If unset, lead push is skipped. |
 | `CLOUDINARY_URL` | yes* | `cloudinary://<api_key>:<api_secret>@<cloud_name>` — stores the PDF. *If unset, the lead still posts; the PDF just isn't hosted. |
 | `ENABLE_PDF` | no | `1` (default) / `0` to disable PDF generation. |
+| `CONSULT_URL` | no | CTA link on the PDF "Next Steps" page (default: smart1marketing.com/free-consultation). |
+| `CONTACT_PHONE` | no | Phone shown on the PDF "Next Steps" page. |
+| `RATE_LIMIT_MAX` | no | Submissions per IP per window (default 6/hour). |
+
+## Lead-safety pipeline
+
+Capture-first: the lead posts to `GHL_WEBHOOK_URL` with `report_status: "captured"` the
+instant the form is submitted — before any AI work. On success a second post arrives with
+`report_status: "completed"` + the report; on AI failure a `generation_failed` post fires
+and the prospect sees a friendly "your plan will be emailed" message (never an error).
+A hidden honeypot field and per-IP rate limiting block bots, and UTM/referrer fields pass
+through to the webhook for attribution. See **GHL-WORKFLOW.md** for the exact GHL setup.
 
 ## Run locally
 

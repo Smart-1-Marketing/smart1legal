@@ -169,6 +169,9 @@
           </div>
           <input type="hidden" name="practice_area" id="practiceArea" />
           <input type="hidden" name="secondary_practice_areas" id="secondaryAreas" />
+          <!-- Honeypot: humans never see or fill this -->
+          <input type="text" name="fax" tabindex="-1" autocomplete="off" aria-hidden="true"
+                 style="position:absolute;left:-9999px;height:0;width:0;opacity:0" />
           <div class="field-err" id="err1">Please choose a primary practice area to continue.</div>
         </section>
 
@@ -481,6 +484,12 @@
       submitBtn.disabled=true; backBtn.disabled=true;
 
       const data = Object.fromEntries(new FormData(form).entries());
+      // Attribution passthrough
+      const q = new URLSearchParams(location.search);
+      ['utm_source','utm_medium','utm_campaign','utm_term','utm_content','gclid','fbclid']
+        .forEach(k=>{ const v=q.get(k); if(v) data[k]=v; });
+      data.referrer_url = document.referrer || '';
+      data.landing_page_url = location.href;
       try {
         const res = await fetch('/api/analyze', {
           method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)
@@ -491,6 +500,11 @@
           throw new Error((json.error || 'Something went wrong.') + detail);
         }
         statusEl.className='status';
+        if(json.queued){
+          statusEl.className='status show';
+          statusEl.innerHTML='<div style="color:#1d5c3d;background:#f0f9f4;border:1px solid #cbe8d6;padding:14px 16px;border-radius:9px;font-size:14px"><b>✓ You\'re all set!</b> '+(json.message||'Your plan is being finished and will be emailed to you shortly.')+'</div>';
+          return;
+        }
         renderResult(json);
       } catch(err){
         statusEl.className='status show';

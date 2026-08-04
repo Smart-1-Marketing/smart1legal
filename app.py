@@ -2,7 +2,9 @@ import io
 import json
 import os
 import re
+import threading
 import time
+from collections import defaultdict, deque
 from typing import Any
 
 import requests
@@ -18,6 +20,8 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import (
     Flowable,
+    HRFlowable,
+    PageBreak,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -36,6 +40,31 @@ ENABLE_PDF = os.getenv("ENABLE_PDF", "1").strip() not in ("0", "false", "False",
 
 # Standardized report name — every generated PDF is stored in Cloudinary under this.
 REPORT_NAME = "legal-conquesting-report"
+
+# Closing CTA shown on the PDF's "Next Steps" page.
+CONSULT_URL = os.getenv("CONSULT_URL", "https://smart1marketing.com/free-consultation").strip()
+CONTACT_PHONE = os.getenv("CONTACT_PHONE", "").strip()
+
+# Per-IP rate limiting (in-memory; resets on deploy — plenty for lead-form abuse control).
+RATE_LIMIT_MAX = int(os.getenv("RATE_LIMIT_MAX", "6"))       # submissions per window
+RATE_LIMIT_WINDOW = int(os.getenv("RATE_LIMIT_WINDOW", "3600"))  # seconds
+_rate_buckets: dict = defaultdict(deque)
+
+
+def _client_ip() -> str:
+    fwd = request.headers.get("X-Forwarded-For", "")
+    return (fwd.split(",")[0].strip() if fwd else request.remote_addr) or "unknown"
+
+
+def _rate_limited(ip: str) -> bool:
+    now = time.time()
+    bucket = _rate_buckets[ip]
+    while bucket and now - bucket[0] > RATE_LIMIT_WINDOW:
+        bucket.popleft()
+    if len(bucket) >= RATE_LIMIT_MAX:
+        return True
+    bucket.append(now)
+    return False
 # NOTE: Cloudinary is imported lazily inside upload_pdf_to_cloudinary() (never at module
 # import) so a missing or misformatted CLOUDINARY_URL can never crash app startup.
 
@@ -395,6 +424,16 @@ def clean_payload(data: dict) -> dict:
         "contact_phone",
         "proposal_recipient_email",
         "notes",
+        # Attribution passthrough — captured by the form from the page URL/referrer.
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_term",
+        "utm_content",
+        "gclid",
+        "fbclid",
+        "referrer_url",
+        "landing_page_url",
     ]
     cleaned = {k: str(data.get(k, "")).strip()[:1500] for k in fields}
     if not re.fullmatch(r"\d{5}(-\d{4})?", cleaned["firm_zip"]):
@@ -656,6 +695,37 @@ def build_report_pdf(report: dict, firm: str) -> bytes:
         buffer = io.BytesIO()
 
         story = []
+
+        # ---------- COVER PAGE ----------
+        cover_title = ParagraphStyle("s1cover", parent=st["title"], fontSize=30, leading=34)
+        cover_firm = ParagraphStyle("s1coverfirm", parent=st["title"], fontSize=20, leading=24,
+                                    textColor=GOLD)
+        story.append(Spacer(1, 1.5 * inch))
+        story.append(Paragraph("SMART 1 MARKETING", st["eyebrow"]))
+        story.append(Spacer(1, 6))
+        story.append(Paragraph("Legal Conquesting Plan", cover_title))
+        story.append(Spacer(1, 4))
+        story.append(HRFlowable(width="35%", thickness=2.4, color=GOLD, hAlign="LEFT",
+                                spaceBefore=8, spaceAfter=16))
+        story.append(Paragraph(f"Prepared exclusively for", st["small"]))
+        story.append(Spacer(1, 2))
+        story.append(Paragraph(firm or "Your Firm", cover_firm))
+        cover_meta = " &nbsp;·&nbsp; ".join(x for x in [
+            report.get("practice_area", ""),
+            time.strftime("%B %d, %Y"),
+        ] if x)
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(cover_meta, st["body"]))
+        story.append(Spacer(1, 1.9 * inch))
+        story.append(Paragraph(
+            "Digital Out-of-Home Smart Signage &nbsp;·&nbsp; High-Intent Geofencing &nbsp;·&nbsp; "
+            "Mobile Retargeting", st["small"]))
+        story.append(Paragraph(
+            "Every board, only when it works — the leg up static billboards can't give you.",
+            st["small"]))
+        story.append(PageBreak())
+
+        # ---------- REPORT ----------
         story.append(Paragraph("SMART 1 MARKETING &nbsp;|&nbsp; LEGAL CONQUESTING PLAN", st["eyebrow"]))
         story.append(Paragraph(firm or "Legal Market Report", st["title"]))
         pa = report.get("practice_area", "")
@@ -901,6 +971,55 @@ def build_report_pdf(report: dict, firm: str) -> bytes:
         story.append(Spacer(1, 12))
         story.append(Paragraph(report.get("disclaimer", ""), st["small"]))
 
+        # ---------- NEXT STEPS / CTA PAGE ----------
+        story.append(PageBreak())
+        story.append(Paragraph("YOUR NEXT STEPS", st["eyebrow"]))
+        story.append(Paragraph("From This Plan to Signed Cases", st["title"]))
+        story.append(HRFlowable(width="35%", thickness=2.4, color=GOLD, hAlign="LEFT",
+                                spaceBefore=8, spaceAfter=14))
+        next_steps = [
+            ("Book your free strategy session",
+             "We walk through this plan together, refine the target locations, and answer every question — "
+             "no cost, no obligation."),
+            ("We build your campaign (first 14 days)",
+             "Creative designed for brand recall, your screen map finalized across roadside, place-based, "
+             "and transit formats, and intent-data audiences layered in — all for your approval before launch."),
+            ("Launch & first report (day 30)",
+             "Your Smart Signage goes live with trigger-based activation, and you receive your first monthly "
+             "report on impressions, location visits, and generated leads."),
+        ]
+        for i, (t, d) in enumerate(next_steps, 1):
+            num = Paragraph(f"<b>{i}</b>", st["cellw"])
+            txt = Paragraph(f"<b>{t}</b><br/><font size=9 color='#68798c'>{d}</font>", st["cell"])
+            tbl = Table([[num, txt]], colWidths=[0.34 * inch, 6.5 * inch])
+            tbl.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (0, -1), GOLD),
+                ("ALIGN", (0, 0), (0, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (1, 0), (1, -1), 12),
+                ("TOPPADDING", (0, 0), (-1, -1), 9),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 9),
+            ]))
+            story.append(tbl)
+            story.append(Spacer(1, 8))
+        cta_lines = [
+            "<b><font size=13 color='#d1a542'>Ready when you are.</font></b>",
+            f"<font size=10 color='#ffffff'>Book your free consultation: "
+            f"<link href='{CONSULT_URL}'><u>{CONSULT_URL}</u></link></font>",
+        ]
+        if CONTACT_PHONE:
+            cta_lines.append(f"<font size=10 color='#c8d2e6'>Or call us directly: <b>{CONTACT_PHONE}</b></font>")
+        cta_cell = Paragraph("<br/>".join(cta_lines), st["cell"])
+        cta = Table([[cta_cell]], colWidths=[6.9 * inch])
+        cta.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), NAVY),
+            ("TOPPADDING", (0, 0), (-1, -1), 16),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 16),
+            ("LEFTPADDING", (0, 0), (-1, -1), 18),
+        ]))
+        story.append(Spacer(1, 10))
+        story.append(cta)
+
         doc = SimpleDocTemplate(buffer, pagesize=letter, title=f"{firm} Legal Conquesting Plan",
                                 leftMargin=0.6 * inch, rightMargin=0.6 * inch,
                                 topMargin=0.6 * inch, bottomMargin=0.6 * inch)
@@ -997,6 +1116,16 @@ def send_webhook(payload: dict, report: Any, status: str, pdf_url: str = "",
         app.logger.exception("Webhook delivery failed")
 
 
+def send_webhook_async(payload: dict, report: Any, status: str, pdf_url: str = "",
+                       download_url: str = "", public_id: str = "") -> None:
+    """Fire-and-forget webhook post so the API response never waits on GHL."""
+    threading.Thread(
+        target=send_webhook,
+        args=(payload, report, status, pdf_url, download_url, public_id),
+        daemon=True,
+    ).start()
+
+
 @app.get("/")
 def index():
     return render_template("index.html")
@@ -1007,42 +1136,60 @@ def health():
     return jsonify({"status": "ok", "service": "smart1legal"})
 
 
+QUEUED_MESSAGE = (
+    "You're all set — we have your information and your market plan is being finished right now. "
+    "The full proposal will be emailed to you shortly, and a Smart 1 strategist will follow up."
+)
+
+
 @app.post("/api/analyze")
 def analyze():
-    try:
-        payload = clean_payload(request.get_json(silent=True) or {})
-        report = generate_report(payload)
-        firm = payload.get("firm_name", "Legal Market Report")
-        pdf_bytes = build_report_pdf(report, firm)
-        pdf_info = upload_pdf_to_cloudinary(pdf_bytes, firm) or {}
-        pdf_url = pdf_info.get("url", "")
-        download_url = pdf_info.get("download_url", "")
-        send_webhook(payload, report, "completed", pdf_url, download_url, pdf_info.get("public_id", ""))
+    raw = request.get_json(silent=True) or {}
+
+    # --- Honeypot: bots fill the hidden "fax" field. Pretend success; never call OpenAI. ---
+    if str(raw.get("fax", "")).strip():
+        return jsonify({"ok": True, "queued": True, "message": QUEUED_MESSAGE})
+
+    # --- Per-IP rate limit ---
+    if _rate_limited(_client_ip()):
         return jsonify({
-            "ok": True,
-            "report": report,
-            "report_name": REPORT_NAME,
-            "report_pdf_url": pdf_url,
-            "report_pdf_download_url": download_url,
-        })
+            "ok": False,
+            "error": "Too many requests from this connection. Please wait a bit and try again, "
+                     "or book a free consultation and we'll build your plan for you.",
+        }), 429
+
+    # --- Validate ---
+    try:
+        payload = clean_payload(raw)
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
-    except Exception as exc:
-        app.logger.exception("Analysis failed")
-        try:
-            send_webhook(clean_payload(request.get_json(silent=True) or {}), None, "failed")
-        except Exception:
-            pass
-        return (
-            jsonify(
-                {
-                    "ok": False,
-                    "error": "The plan could not be generated. Check the server configuration and try again.",
-                    "detail": f"{type(exc).__name__}: {exc}",
-                }
-            ),
-            500,
-        )
+
+    # --- CAPTURE-FIRST: the lead reaches GHL the moment they submit, before any AI work. ---
+    send_webhook_async(payload, None, "captured")
+
+    firm = payload.get("firm_name", "Legal Market Report")
+
+    # --- Generate. On failure the lead is already safe — return a friendly queued message. ---
+    try:
+        report = generate_report(payload)
+    except Exception:
+        app.logger.exception("Report generation failed (lead already captured)")
+        send_webhook_async(payload, None, "generation_failed")
+        return jsonify({"ok": True, "queued": True, "message": QUEUED_MESSAGE})
+
+    # --- PDF + Cloudinary (guarded; never blocks) then the completed webhook. ---
+    pdf_bytes = build_report_pdf(report, firm)
+    pdf_info = upload_pdf_to_cloudinary(pdf_bytes, firm) or {}
+    pdf_url = pdf_info.get("url", "")
+    download_url = pdf_info.get("download_url", "")
+    send_webhook_async(payload, report, "completed", pdf_url, download_url, pdf_info.get("public_id", ""))
+    return jsonify({
+        "ok": True,
+        "report": report,
+        "report_name": REPORT_NAME,
+        "report_pdf_url": pdf_url,
+        "report_pdf_download_url": download_url,
+    })
 
 
 if __name__ == "__main__":
