@@ -534,6 +534,20 @@
       html += '<div class="pkg"><b>'+ (rp.monthly_investment||'') +' — '+ (rp.package_name||'') +'</b><br>'+
               '<span style="font-size:13px;color:#c8d2e6">'+ (rp.description||'') +'</span></div>';
 
+      // Good / Better / Best pricing scenarios
+      const scen = r.pricing_scenarios||[];
+      if(scen.length){
+        html += '<div class="hiw-title">Good · Better · Best — sized to your market</div><div class="net">';
+        scen.forEach(s=>{
+          const rec = (s.package_name||'').toLowerCase() === (rp.package_name||'').toLowerCase();
+          html += '<div class="net-card"'+(rec?' style="outline:2px solid var(--gold)"':'')+'>'+
+                  '<div class="net-fmt">'+(s.tier||'')+(rec?' ★ Recommended':'')+'</div>'+
+                  '<div style="font-size:17px;font-weight:800;color:#fff;margin-bottom:4px">'+(s.monthly_investment||'')+'</div>'+
+                  '<div class="net-v"><b>'+(s.package_name||'')+'</b><br>'+(s.coverage||'')+'</div></div>';
+        });
+        html += '</div><p style="font-size:11.5px;color:#687386;margin:8px 0 0"><i>Suggested starting budgets based on your market\'s size — in a free consultation we\'ll tailor a budget that works for your firm.</i></p>';
+      }
+
       // Why DOOH beats a static billboard — advantages
       const advs = r.dooh_advantages||[];
       if(advs.length){

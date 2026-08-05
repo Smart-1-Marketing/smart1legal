@@ -42,7 +42,7 @@ ENABLE_PDF = os.getenv("ENABLE_PDF", "1").strip() not in ("0", "false", "False",
 REPORT_NAME = "legal-conquesting-report"
 
 # Closing CTA shown on the PDF's "Next Steps" page.
-CONSULT_URL = os.getenv("CONSULT_URL", "https://smart1marketing.com/free-consultation").strip()
+CONSULT_URL = os.getenv("CONSULT_URL", "https://smart1marketing.com/legalmarketingconsult").strip()
 CONTACT_PHONE = os.getenv("CONTACT_PHONE", "").strip()
 
 # Per-IP rate limiting (in-memory; resets on deploy — plenty for lead-form abuse control).
@@ -200,8 +200,10 @@ WEATHER-TRIGGERED ACTIVATION
 - weather_triggers ONLY meaningfully apply to Personal Injury / Auto Accident / DUI
   markets (crashes spike in rain, snow, ice, fog, first-freeze, holiday travel).
 - For PI/auto/DUI firms, return 4-7 short punchy trigger labels (e.g. "Heavy rain",
-  "Snow / ice event", "Dense fog", "First freeze", "Holiday travel weekend",
-  "Rush-hour storm"). weather_triggers_applicable = true.
+  "Snow / ice event", "Ice storm", "Freeze warning", "Frost warning", "Dense fog",
+  "First freeze", "Holiday travel weekend", "Rush-hour storm"). Include freeze warnings,
+  ice storms, and frost warnings whenever the market's climate makes them relevant.
+  weather_triggers_applicable = true.
 - For non-injury practice areas (family, immigration, estate, bankruptcy, employment),
   set weather_triggers_applicable = false and return an EMPTY weather_triggers list;
   do not force weather logic where it does not fit.
@@ -323,6 +325,22 @@ REPORT_SCHEMA = {
                 },
                 "required": ["package_name", "monthly_investment", "description"],
             },
+            "pricing_scenarios": {
+                "type": "array",
+                "minItems": 3,
+                "maxItems": 3,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "tier": {"type": "string", "enum": ["Good", "Better", "Best"]},
+                        "package_name": {"type": "string"},
+                        "monthly_investment": {"type": "string"},
+                        "coverage": {"type": "string"},
+                    },
+                    "required": ["tier", "package_name", "monthly_investment", "coverage"],
+                },
+            },
             "media_channels": {"type": "array", "items": {"type": "string"}},
             "mobile_retargeting_note": {"type": "string"},
             "weather_triggers_applicable": {"type": "boolean"},
@@ -397,6 +415,7 @@ REPORT_SCHEMA = {
             "expected_outcomes",
             "market_profile",
             "recommended_package",
+            "pricing_scenarios",
             "media_channels",
             "mobile_retargeting_note",
             "weather_triggers_applicable",
@@ -513,6 +532,12 @@ def generate_report(payload: dict) -> Any:
         "that level buys. Pick the tier from market size, competition, and case volume.\n"
         "  SMART 1 LEGAL PACKAGE MENU (use these, do not invent prices):\n"
         f"{_package_menu_text()}\n"
+        "- pricing_scenarios: EXACTLY 3 tiers — Good, Better, Best — drawn from the package menu above "
+        "and SCALED TO THIS MARKET'S POPULATION AND SIZE (small/rural market → the three lower tiers; "
+        "major metro → the three higher tiers). The recommended_package must be one of the three "
+        "(typically the Better tier). For each, coverage is one plain sentence describing what that "
+        "spend level buys in THIS market — how much of the screen network, how many high-intent zones, "
+        "and how aggressively triggers/conquesting run. Use exact menu names and prices.\n"
         "- media_channels: ALLOWED channels only, per the system rules. ALWAYS include the three "
         "anchor chips ('Digital Out-of-Home (DOOH) Smart Signage', 'Location Look-Back Mobile "
         "Retargeting', 'In-Market Legal Intent Audience Data'), then 2-4 more relevant chips. Return "
@@ -669,10 +694,13 @@ def _pdf_styles():
     ss = getSampleStyleSheet()
     body = ParagraphStyle("s1body", parent=ss["Normal"], fontName="Helvetica",
                           fontSize=9.5, leading=14, textColor=colors.HexColor("#25364b"))
+    # keepWithNext prevents a section heading from being orphaned at the bottom of a page.
     h2 = ParagraphStyle("s1h2", parent=ss["Heading2"], fontName="Helvetica-Bold",
-                        fontSize=13, leading=16, textColor=NAVY, spaceBefore=16, spaceAfter=6)
+                        fontSize=13, leading=16, textColor=NAVY, spaceBefore=16, spaceAfter=6,
+                        keepWithNext=1)
     title = ParagraphStyle("s1title", parent=ss["Title"], fontName="Helvetica-Bold",
-                           fontSize=22, leading=25, textColor=NAVY, alignment=TA_LEFT, spaceAfter=4)
+                           fontSize=22, leading=25, textColor=NAVY, alignment=TA_LEFT, spaceAfter=4,
+                           keepWithNext=1)
     eyebrow = ParagraphStyle("s1eye", parent=body, fontName="Helvetica-Bold",
                              fontSize=8, textColor=GOLD, spaceAfter=2)
     small = ParagraphStyle("s1small", parent=body, fontSize=8, textColor=MUTED, leading=11)
@@ -878,6 +906,125 @@ def build_report_pdf(report: dict, firm: str) -> bytes:
         story.append(Paragraph("Recommended Package", st["h2"]))
         story.append(Paragraph(f"<b>{rp.get('monthly_investment','')} — {rp.get('package_name','')}</b>", st["body"]))
         story.append(Paragraph(rp.get("description", ""), st["small"]))
+
+        # --- Good / Better / Best pricing scenarios (scaled to market size) ---
+        scenarios = report.get("pricing_scenarios", []) or []
+        if scenarios:
+            story.append(Paragraph("Good · Better · Best — Sized to Your Market", st["h2"]))
+            story.append(Paragraph(
+                "Three ways to enter this market, scaled to its population and competition:", st["small"]))
+            story.append(Spacer(1, 4))
+            rec_name = (rp.get("package_name") or "").strip().lower()
+            hdr_cells, body_cells = [], []
+            rec_col = -1
+            for i, sc in enumerate(scenarios):
+                is_rec = (sc.get("package_name", "").strip().lower() == rec_name)
+                if is_rec:
+                    rec_col = i
+                tier_label = sc.get("tier", "") + (" ★ RECOMMENDED" if is_rec else "")
+                hdr_cells.append(Paragraph(f"<b>{tier_label}</b>", st["cellw"]))
+                body_cells.append(Paragraph(
+                    f"<b><font size=13>{sc.get('monthly_investment','')}</font></b><br/>"
+                    f"<b>{sc.get('package_name','')}</b><br/>"
+                    f"<font size=8 color='#68798c'>{sc.get('coverage','')}</font>", st["cell"]))
+            sc_tbl = Table([hdr_cells, body_cells], colWidths=[2.3 * inch] * len(scenarios))
+            sc_style = [
+                ("BACKGROUND", (0, 0), (-1, 0), NAVY),
+                ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+                ("GRID", (0, 0), (-1, -1), 0.5, LINE),
+                ("VALIGN", (0, 1), (-1, 1), "TOP"),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+            ]
+            if rec_col >= 0:
+                sc_style.append(("BACKGROUND", (rec_col, 0), (rec_col, 0), GOLD))
+                sc_style.append(("BACKGROUND", (rec_col, 1), (rec_col, 1), colors.HexColor("#fffdf6")))
+                sc_style.append(("BOX", (rec_col, 0), (rec_col, 1), 1.4, GOLD))
+            sc_tbl.setStyle(TableStyle(sc_style))
+            story.append(sc_tbl)
+            story.append(Spacer(1, 6))
+        story.append(Paragraph(
+            "<i>These figures are a suggested starting budget based on your market's size. In a free "
+            "consultation we'll tailor a budget that works for your firm — every plan can flex up or "
+            "down with your caseload goals.</i>", st["small"]))
+
+        # --- How this investment saves money vs. traditional advertising ---
+        story.append(Paragraph("How This Investment Saves You Money", st["h2"]))
+        story.append(Paragraph(
+            "Compared to a traditional static billboard buy, Smart Signage removes the fixed costs and "
+            "the waste:", st["body"]))
+        story.append(Spacer(1, 4))
+        save_rows = [
+            [Paragraph("<b></b>", st["cellw"]),
+             Paragraph("<b>Traditional Static Billboard</b>", st["cellw"]),
+             Paragraph("<b>Smart Signage DOOH</b>", st["cellw"])],
+            ["What you pay for",
+             "One location — 100% of passing traffic, relevant or not",
+             "The full screen network — activated only when your audience is present"],
+            ["Creative changes",
+             "Production + install crew each change (typically $500–$1,500)",
+             "Included — creative swapped digitally in minutes, at no cost"],
+            ["Commitment",
+             "Flat rate, often locked in for 6–12 months",
+             "Budget flexes month to month with real demand"],
+            ["Audience data",
+             "None — everyone who drives by",
+             "In-market legal-intent data targets likely claimants"],
+            ["Proof it worked",
+             "No attribution",
+             "Impressions, location visits & leads reported monthly"],
+        ]
+        save_cells = [save_rows[0]] + [
+            [Paragraph(f"<b>{r[0]}</b>", st["cell"]),
+             Paragraph(r[1], st["cell"]),
+             Paragraph(r[2], st["cell"])] for r in save_rows[1:]
+        ]
+        sv_tbl = Table(save_cells, colWidths=[1.15 * inch, 2.85 * inch, 2.9 * inch], repeatRows=1)
+        sv_tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), NAVY),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, MIST]),
+            ("GRID", (0, 0), (-1, -1), 0.5, LINE),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ]))
+        story.append(sv_tbl)
+
+        # Demand-paced savings, computed from the month-by-month plan's pacing dollars.
+        plan_rows = report.get("monthly_plan", []) or []
+        pacing_dollars = []
+        for row_ in plan_rows:
+            m_ = re.search(r"\$([\d,]+)", row_.get("pacing", "") or "")
+            if m_:
+                pacing_dollars.append(int(m_.group(1).replace(",", "")))
+        if len(pacing_dollars) == 12 and max(pacing_dollars) > 0:
+            peak_ = max(pacing_dollars)
+            paced_total = sum(pacing_dollars)
+            flat_total = peak_ * 12
+            saved = flat_total - paced_total
+            if saved > 0:
+                usd = lambda v: "$" + f"{v:,}"
+                story.append(Spacer(1, 8))
+                sv_note = Paragraph(
+                    f"<b><font color='#d1a542'>Demand-paced budgeting saves {usd(saved)} a year.</font></b><br/>"
+                    f"<font size=9 color='#ffffff'>A flat always-on buy at your peak rate would run "
+                    f"{usd(flat_total)}/year. Your demand-paced plan invests {usd(paced_total)} — spend steps "
+                    f"down when cases slow, and no production or install fees ever apply.</font>", st["cell"])
+                sv_box = Table([[sv_note]], colWidths=[6.9 * inch])
+                sv_box.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, -1), NAVY),
+                    ("TOPPADDING", (0, 0), (-1, -1), 12),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 16),
+                ]))
+                story.append(sv_box)
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(
+            "Traditional-billboard cost ranges are industry-typical figures for comparison, not a quote.",
+            st["small"]))
 
         chans = report.get("media_channels", []) or []
         if chans:
