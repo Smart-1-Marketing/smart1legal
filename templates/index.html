@@ -6,12 +6,12 @@
   <title>Smart 1 Marketing — Legal Conquesting Market Plan</title>
   <style>
     :root{
-      --navy:#1A2E58; --blue:#28477F; --gold:#B8892B; --gold-2:#d1a542;
+      --navy:#0A2240; --blue:#009ED2; --gold:#B8892B; --gold-2:#d1a542;
       --ink:#25364b; --muted:#687386; --line:#dfe3ea; --mist:#f2f5fa; --white:#fff;
     }
     *{box-sizing:border-box}
     body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-      color:var(--ink);background:linear-gradient(180deg,#0f1c38 0%,#1A2E58 40%,#26365c 100%);min-height:100vh}
+      color:var(--ink);background:linear-gradient(180deg,#061831 0%,#0A2240 40%,#123059 100%);min-height:100vh}
     .wrap{max-width:940px;margin:0 auto;padding:30px 18px 60px}
     header{text-align:center;color:#fff;margin-bottom:22px}
     .eyebrow{letter-spacing:.16em;font-size:12px;font-weight:700;color:var(--gold-2);text-transform:uppercase}
@@ -135,11 +135,65 @@
     @media(max-width:560px){.outs,.net{grid-template-columns:1fr}}
     .dl{display:inline-block;margin-top:12px;background:var(--navy);color:#fff;text-decoration:none;
       padding:11px 18px;border-radius:9px;font-weight:700;font-size:14px}
+
+    /* Seasonal pacing bars (screen version of the PDF's PacingBars) */
+    .pace{display:grid;gap:8px;margin:6px 0 4px}
+    .pace-row{display:flex;align-items:center;gap:10px}
+    .pace-lbl{flex:0 0 66px;font-size:12px;font-weight:800;color:var(--navy)}
+    .pace-track{flex:1;height:14px;background:#fff;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+    .pace-track i{display:block;height:100%;border-radius:7px}
+    .pace-peak{background:linear-gradient(90deg,var(--gold),var(--gold-2))}
+    .pace-shoulder{background:var(--blue)}
+    .pace-low{background:#9fb0cd}
+    .pace-val{flex:0 0 96px;font-size:12px;color:var(--muted);text-align:right}
+
+    /* On-screen report footer line */
+    .report-foot{margin:16px 0 0;padding-top:12px;border-top:1px solid var(--line);
+      font-size:12px;color:var(--muted);text-align:center}
+
+    /* Page-load overlay (SPEC §7a) — shown instantly, hidden on first paint */
+    #bootOverlay{position:fixed;inset:0;z-index:9999;background:var(--navy);display:flex;
+      align-items:center;justify-content:center;text-align:center;transition:opacity .35s ease}
+    #bootOverlay.hide{opacity:0;pointer-events:none}
+    .boot-brand{color:#fff;font-weight:800;letter-spacing:.22em;font-size:15px;margin-bottom:16px}
+    .boot-brand span{color:var(--blue)}
+    .boot-cap{color:#8ea1c4;font-size:12.5px;margin-top:14px}
+    .boot-cap::after{content:"";animation:dots 1.4s steps(4,end) infinite}
+    @media(prefers-reduced-motion:reduce){
+      #bootOverlay,.loader *,.spinner,.track > i{animation:none!important;transition:none!important}
+    }
+
     footer{text-align:center;color:#9fb0cd;font-size:12px;margin-top:24px}
     @media(max-width:560px){.grid,.stat-row{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
+  <!-- Page-load overlay: navy + wordmark + simplified animated billboard; hidden on first paint -->
+  <div id="bootOverlay" aria-hidden="true">
+    <div>
+      <div class="boot-brand">SMART<span>1</span>MARKETING</div>
+      <svg viewBox="0 0 160 122" width="150" height="115" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <circle cx="76" cy="48" r="14" fill="none" stroke="#009ED2" stroke-width="2" opacity="0">
+          <animate attributeName="r" values="14;56" dur="2s" repeatCount="indefinite"/>
+          <animate attributeName="opacity" values="0.6;0" dur="2s" repeatCount="indefinite"/>
+        </circle>
+        <circle cx="76" cy="48" r="14" fill="none" stroke="#009ED2" stroke-width="2" opacity="0">
+          <animate attributeName="r" values="14;56" dur="2s" begin="1s" repeatCount="indefinite"/>
+          <animate attributeName="opacity" values="0.6;0" dur="2s" begin="1s" repeatCount="indefinite"/>
+        </circle>
+        <rect x="72" y="72" width="8" height="42" fill="#3a5578"/>
+        <rect x="30" y="22" width="92" height="52" rx="6" fill="#13355f"/>
+        <rect x="37" y="29" width="78" height="38" rx="3" fill="#009ED2" opacity="0.22"/>
+        <rect x="44" y="36" width="42" height="7" rx="3" fill="#d1a542">
+          <animate attributeName="opacity" values="1;0.3;1" dur="1.3s" repeatCount="indefinite"/>
+        </rect>
+        <rect x="44" y="49" width="60" height="5" rx="2" fill="#8ea1c4"/>
+        <rect x="44" y="58" width="50" height="5" rx="2" fill="#8ea1c4" opacity="0.7"/>
+      </svg>
+      <div class="boot-cap">Loading your market plan builder</div>
+    </div>
+  </div>
+
   <div class="wrap">
     <header>
       <div class="eyebrow">Smart 1 Marketing</div>
@@ -259,10 +313,25 @@
       <div class="result" id="result"><div class="result-inner" id="resultInner"></div></div>
     </div>
 
-    <footer>© Smart 1 Marketing · Estimates are AI planning projections for marketing use, not audited counts.</footer>
+    <footer>Smart 1 Marketing · (614) 536-0768 · smart1marketing.com<br>
+      © Smart 1 Marketing · Estimates are AI planning projections for marketing use, not audited counts.</footer>
   </div>
 
   <script>
+    // ---- Page-load overlay (SPEC §7a): hide on first paint, signal embeds ----
+    (function(){
+      const ov = document.getElementById('bootOverlay');
+      let hidden = false;
+      function hideBoot(){
+        if(hidden) return; hidden = true;
+        if(ov){ ov.classList.add('hide'); setTimeout(()=>{ if(ov.parentNode) ov.parentNode.removeChild(ov); }, 450); }
+        try{ if(window.parent && window.parent !== window) window.parent.postMessage('app-ready','*'); }catch(e){}
+      }
+      if(document.readyState !== 'loading'){ setTimeout(hideBoot, 150); }
+      else { document.addEventListener('DOMContentLoaded', ()=> setTimeout(hideBoot, 150)); }
+      window.addEventListener('load', hideBoot);
+    })();
+
     // ---- Practice areas (icon = simple inline SVG path set) ----
     const ICON = {
       injury:'<path d="M12 21s-7-4.5-9.5-9A5 5 0 0 1 12 6a5 5 0 0 1 9.5 6c-2.5 4.5-9.5 9-9.5 9z"/><path d="M9 12h2l1-2 1 4 1-2h2"/>',
@@ -372,11 +441,9 @@
 
     nextBtn.onclick = ()=>{
       if(!validateStep(step)) return;
-      // Default the "send to" email to the contact email as they move forward.
-      if(step===2){
-        const ce=document.getElementById('contact_email');
-        const pr=document.getElementById('proposal_recipient_email');
-      }
+      // Partial lead: fire once when the user advances from step 2 → 3
+      // (firm name / website / ZIP / practice area are known at this point).
+      if(step===2) sendPartial();
       showStep(step+1);
     };
     backBtn.onclick = ()=> showStep(step-1);
@@ -390,6 +457,46 @@
 
     // ---- Submit ----
     const form = document.getElementById('legalForm');
+
+    // ---- Partial lead capture (SPEC §3) ----
+    const API_BASE = '';
+    const LEAD_ID = (crypto.randomUUID ? crypto.randomUUID() : Date.now()+'-'+Math.random().toString(16).slice(2));
+    const ATTR = (() => {
+      const q = new URLSearchParams(location.search);
+      const keys = ['utm_source','utm_medium','utm_campaign','utm_term','utm_content','gclid','fbclid'];
+      const o = {};
+      keys.forEach(k=>{ const v=q.get(k); if(v) o[k]=v.slice(0,200); });
+      o.referrer_url = (document.referrer||'').slice(0,300);
+      o.landing_page_url = (q.get('s1_ref')||location.href).slice(0,300);
+      return o;
+    })();
+    let partialSent = false;
+    let finalSubmitted = false;
+    function fieldVal(name){ const el = form.elements[name]; return el ? el.value.trim() : ''; }
+    function partialPayload(){
+      return {
+        firm_name: fieldVal('firm_name'),
+        website: fieldVal('website'),
+        firm_zip: fieldVal('firm_zip'),
+        target_radius: fieldVal('target_radius'),
+        practice_area: primary,
+        secondary_practice_areas: Array.from(secondary).join(', '),
+        primary_goal: fieldVal('primary_goal'),
+        notes: fieldVal('notes')
+      };
+    }
+    function sendPartial(){
+      if (partialSent || finalSubmitted) return;
+      const p = partialPayload();
+      if (!p.website && !p.firm_name) return; // need at least something identifying
+      partialSent = true;
+      const body = JSON.stringify({ ...p, ...ATTR, lead_id: LEAD_ID, lead_stage: 'partial' });
+      if (navigator.sendBeacon) navigator.sendBeacon(API_BASE + '/api/partial-lead', new Blob([body], {type:'application/json'}));
+      else fetch(API_BASE + '/api/partial-lead', {method:'POST', headers:{'Content-Type':'application/json'}, body, keepalive:true});
+    }
+    window.addEventListener('pagehide', sendPartial);
+    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') sendPartial(); });
+
     const statusEl = document.getElementById('status');
     const resultEl = document.getElementById('result');
     const resultInner = document.getElementById('resultInner');
@@ -401,7 +508,7 @@
     const LOADER_SVG = `
       <svg class="stage" viewBox="0 0 420 150" width="100%" xmlns="http://www.w3.org/2000/svg" aria-label="Building your plan">
         <!-- radar rings from the screen -->
-        <g fill="none" stroke="#28477F" stroke-width="2">
+        <g fill="none" stroke="#009ED2" stroke-width="2">
           <circle cx="78" cy="64" r="10" opacity="0">
             <animate attributeName="r" values="10;46" dur="2.2s" repeatCount="indefinite"/>
             <animate attributeName="opacity" values="0.5;0" dur="2.2s" repeatCount="indefinite"/>
@@ -414,8 +521,8 @@
         <!-- billboard pole -->
         <rect x="74" y="86" width="8" height="46" fill="#c3ccdc"/>
         <!-- billboard screen -->
-        <rect x="40" y="34" width="76" height="52" rx="6" fill="#1A2E58"/>
-        <rect x="47" y="41" width="62" height="38" rx="3" fill="#28477F"/>
+        <rect x="40" y="34" width="76" height="52" rx="6" fill="#0A2240"/>
+        <rect x="47" y="41" width="62" height="38" rx="3" fill="#123a63"/>
         <rect x="52" y="47" width="34" height="6" rx="3" fill="#d1a542">
           <animate attributeName="opacity" values="1;0.35;1" dur="1.4s" repeatCount="indefinite"/>
         </rect>
@@ -430,8 +537,22 @@
           </animateMotion>
           <animate attributeName="opacity" values="0;1;1;0" dur="1.8s" repeatCount="indefinite"/>
         </circle>
+        <!-- scales-of-justice motif (legal industry accent) -->
+        <g transform="translate(206,112)" stroke="#B8892B" stroke-width="2" fill="none" stroke-linecap="round">
+          <g>
+            <animateTransform attributeName="transform" type="rotate" values="-7 0 -10;7 0 -10;-7 0 -10" dur="3.2s" repeatCount="indefinite"/>
+            <path d="M-18,-10 L18,-10"/>
+            <path d="M-18,-10 L-24,3 M-18,-10 L-12,3"/>
+            <path d="M-24,3 a6 6 0 0 0 12 0"/>
+            <path d="M18,-10 L12,3 M18,-10 L24,3"/>
+            <path d="M12,3 a6 6 0 0 0 12 0"/>
+          </g>
+          <path d="M0,-10 L0,16"/>
+          <path d="M-9,18 L9,18"/>
+          <circle cx="0" cy="-14" r="2.6" fill="#B8892B" stroke="none"/>
+        </g>
         <!-- phone -->
-        <rect x="300" y="40" width="54" height="80" rx="9" fill="#1A2E58"/>
+        <rect x="300" y="40" width="54" height="80" rx="9" fill="#0A2240"/>
         <rect x="306" y="48" width="42" height="60" rx="3" fill="#eaf0f8"/>
         <circle cx="327" cy="114" r="3" fill="#8ea1c4"/>
         <!-- phone glow pulse -->
@@ -484,12 +605,10 @@
       submitBtn.disabled=true; backBtn.disabled=true;
 
       const data = Object.fromEntries(new FormData(form).entries());
-      // Attribution passthrough
-      const q = new URLSearchParams(location.search);
-      ['utm_source','utm_medium','utm_campaign','utm_term','utm_content','gclid','fbclid']
-        .forEach(k=>{ const v=q.get(k); if(v) data[k]=v; });
-      data.referrer_url = document.referrer || '';
-      data.landing_page_url = location.href;
+      // Attribution passthrough + the same lead_id as the partial ping so GHL merges records.
+      Object.assign(data, ATTR);
+      data.lead_id = LEAD_ID;
+      finalSubmitted = true; // suppress the abandon-partial once the full lead is submitted
       try {
         const res = await fetch('/api/analyze', {
           method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)
@@ -587,13 +706,42 @@
         html += '</div>';
       }
 
+      // Seasonal pacing — Peak / Shoulder / Low budget bars (screen version of the PDF's PacingBars)
+      const plan = r.monthly_plan||[];
+      if(plan.length){
+        const tiers = {};
+        plan.forEach(mo=>{
+          const pac = mo.pacing||'';
+          const tm = pac.match(/^\s*(Peak|Shoulder|Low)/i);
+          const dm = pac.match(/\$([\d,]+)/);
+          if(tm && dm){
+            const t = tm[1].charAt(0).toUpperCase()+tm[1].slice(1).toLowerCase();
+            if(!(t in tiers)) tiers[t] = parseInt(dm[1].replace(/,/g,''),10);
+          }
+        });
+        const tierRows = ['Peak','Shoulder','Low'].filter(t=>tiers[t]!=null);
+        if(tierRows.length){
+          const maxd = Math.max.apply(null, tierRows.map(t=>tiers[t])) || 1;
+          html += '<div class="hiw-title">Seasonal pacing — spend flexes with demand</div><div class="pace">';
+          tierRows.forEach(t=>{
+            const pct = Math.max(Math.round(tiers[t]/maxd*100), 4);
+            html += '<div class="pace-row"><span class="pace-lbl">'+t+'</span>'+
+                    '<span class="pace-track"><i class="pace-'+t.toLowerCase()+'" style="width:'+pct+'%"></i></span>'+
+                    '<span class="pace-val">$'+tiers[t].toLocaleString('en-US')+'/mo</span></div>';
+          });
+          html += '</div>';
+        }
+      }
+
       html += '<div class="chips">'+chans+'</div>';
-      if (json.report_pdf_url){
-        html += '<a class="dl" href="'+json.report_pdf_url+'" target="_blank" rel="noopener">⬇ Download Full Proposal PDF</a>';
+      const pdfHref = json.report_pdf_download_url || json.report_pdf_url;
+      if (pdfHref){
+        html += '<a class="dl" href="'+pdfHref+'" target="_blank" rel="noopener">⬇ Download Full Proposal PDF</a>';
       }
       if (sendTo){
         html += '<p style="font-size:12.5px;color:#687386;margin:12px 0 0">A copy is on its way to <b>'+sendTo+'</b>.</p>';
       }
+      html += '<p class="report-foot">Smart 1 Marketing · (614) 536-0768 · smart1marketing.com</p>';
       resultInner.innerHTML = html;
       resultEl.classList.add('show');
     }

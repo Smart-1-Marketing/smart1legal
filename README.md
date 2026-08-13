@@ -46,6 +46,12 @@ one and may not invent prices.
 - `POST /api/analyze` — `{firm_name, website, firm_zip, practice_area, target_radius,
   primary_goal, secondary_practice_areas, contact_*, notes}` →
   `{ok, report, report_name, report_pdf_url, report_pdf_download_url}`
+- `POST /api/partial-lead` — partial lead capture (fired when a visitor advances past the
+  firm/market step or abandons the page); forwards to the webhook with
+  `report_status: "partial"` and the shared `lead_id`. Always responds `{ok: true}`.
+- `GET /pdf/<report_id>` — local PDF fallback when Cloudinary is unconfigured. Ephemeral:
+  in-memory per worker with a short TTL, lost on restart/redeploy — set `CLOUDINARY_URL`
+  for durable hosting.
 - `GET /health` — health check
 
 ## Report storage & delivery
@@ -64,9 +70,11 @@ The proposal PDF is named **`legal-conquesting-report`**, stored in **Cloudinary
 | `GHL_WEBHOOK_URL` | yes | GoHighLevel inbound webhook the lead + report is posted to. If unset, lead push is skipped. |
 | `CLOUDINARY_URL` | yes* | `cloudinary://<api_key>:<api_secret>@<cloud_name>` — stores the PDF. *If unset, the lead still posts; the PDF just isn't hosted. |
 | `ENABLE_PDF` | no | `1` (default) / `0` to disable PDF generation. |
-| `CONSULT_URL` | no | CTA link on the PDF "Next Steps" page (default: smart1marketing.com/free-consultation). |
+| `CONSULT_URL` | no | CTA link on the PDF "Next Steps" page (default: smart1marketing.com/legalmarketingconsult). |
 | `CONTACT_PHONE` | no | Phone shown on the PDF "Next Steps" page. |
-| `RATE_LIMIT_MAX` | no | Submissions per IP per window (default 6/hour). |
+| `RATE_LIMIT_MAX` | no | `/api/analyze` submissions per IP per window (default 6). |
+| `RATE_LIMIT_WINDOW` | no | Rate-limit window in seconds (default 3600). |
+| `PORT` | no | Local dev server port (default 5000; Render sets its own). |
 
 ## Lead-safety pipeline
 

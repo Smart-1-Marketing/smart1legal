@@ -18,3 +18,11 @@ services:
         sync: false
       - key: ENABLE_PDF
         value: "1"
+      - key: CONSULT_URL
+        value: https://smart1marketing.com/legalmarketingconsult
+      - key: CONTACT_PHONE
+        value: "(614) 536-0768"
+      - key: RATE_LIMIT_MAX
+        value: "6"
+      - key: RATE_LIMIT_WINDOW
+        value: "3600"

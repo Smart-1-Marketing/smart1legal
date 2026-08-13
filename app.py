@@ -4,12 +4,13 @@ import os
 import re
 import threading
 import time
+import uuid
 from collections import defaultdict, deque
 from typing import Any
 
 import requests
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_file
 
 # reportlab is pure-Python (no system libraries) so the PDF builder deploys
 # cleanly on Render's native Python runtime with no Docker/apt changes.
@@ -50,18 +51,30 @@ RATE_LIMIT_MAX = int(os.getenv("RATE_LIMIT_MAX", "6"))       # submissions per w
 RATE_LIMIT_WINDOW = int(os.getenv("RATE_LIMIT_WINDOW", "3600"))  # seconds
 _rate_buckets: dict = defaultdict(deque)
 
+# Separate, lighter bucket for /api/partial-lead so partial pings never consume the
+# expensive AI endpoint's budget.
+PARTIAL_RATE_LIMIT_MAX = 30
+_partial_rate_buckets: dict = defaultdict(deque)
+
 
 def _client_ip() -> str:
     fwd = request.headers.get("X-Forwarded-For", "")
     return (fwd.split(",")[0].strip() if fwd else request.remote_addr) or "unknown"
 
 
-def _rate_limited(ip: str) -> bool:
+def _rate_limited(ip: str, buckets: dict = None, max_hits: int = None, window: int = None) -> bool:
+    buckets = _rate_buckets if buckets is None else buckets
+    max_hits = RATE_LIMIT_MAX if max_hits is None else max_hits
+    window = RATE_LIMIT_WINDOW if window is None else window
     now = time.time()
-    bucket = _rate_buckets[ip]
-    while bucket and now - bucket[0] > RATE_LIMIT_WINDOW:
+    # Evict stale/empty buckets so the in-memory map can't grow unbounded.
+    for key, dq in list(buckets.items()):
+        if not dq or now - dq[-1] > window:
+            del buckets[key]
+    bucket = buckets[ip]
+    while bucket and now - bucket[0] > window:
         bucket.popleft()
-    if len(bucket) >= RATE_LIMIT_MAX:
+    if len(bucket) >= max_hits:
         return True
     bucket.append(now)
     return False
@@ -429,8 +442,12 @@ REPORT_SCHEMA = {
 }
 
 
+EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+
+
 def clean_payload(data: dict) -> dict:
     fields = [
+        "lead_id",
         "firm_name",
         "website",
         "firm_zip",
@@ -457,6 +474,10 @@ def clean_payload(data: dict) -> dict:
     cleaned = {k: str(data.get(k, "")).strip()[:1500] for k in fields}
     if not re.fullmatch(r"\d{5}(-\d{4})?", cleaned["firm_zip"]):
         raise ValueError("A valid U.S. ZIP code is required.")
+    if not cleaned["contact_name"]:
+        raise ValueError("Your name is required so we can send the plan.")
+    if not EMAIL_RE.fullmatch(cleaned["contact_email"]):
+        raise ValueError("A valid contact email is required so we can send the plan.")
     if not cleaned["practice_area"]:
         cleaned["practice_area"] = "Personal Injury"
     # Where the finished plan should be sent — defaults to the contact email.
@@ -588,8 +609,9 @@ def generate_report(payload: dict) -> Any:
 # from Smart1Suite. Guarded so any failure never blocks the lead/webhook.
 # ---------------------------------------------------------------------------
 
-NAVY = colors.HexColor("#1A2E58")
-BLUE = colors.HexColor("#28477F")
+# Canonical Smart 1 brand tokens (kept in sync with templates/index.html CSS vars).
+NAVY = colors.HexColor("#0A2240")
+BLUE = colors.HexColor("#009ED2")
 GOLD = colors.HexColor("#B8892B")
 LINE = colors.HexColor("#dfe3ea")
 MUTED = colors.HexColor("#687386")
@@ -709,6 +731,16 @@ def _pdf_styles():
     return dict(body=body, h2=h2, title=title, eyebrow=eyebrow, small=small, cell=cell, cellw=cellw)
 
 
+def _pdf_footer(canvas_, doc_):
+    """Brand footer drawn on every PDF page."""
+    canvas_.saveState()
+    canvas_.setFont("Helvetica", 7.5)
+    canvas_.setFillColor(MUTED)
+    canvas_.drawCentredString(letter[0] / 2, 0.35 * inch,
+                              "Smart 1 Marketing · (614) 536-0768 · smart1marketing.com")
+    canvas_.restoreState()
+
+
 def build_report_pdf(report: dict, firm: str) -> bytes:
     """Render the report JSON to a branded PDF and return the raw PDF bytes (or b'' on failure)."""
     if not ENABLE_PDF:
@@ -793,7 +825,7 @@ def build_report_pdf(report: dict, firm: str) -> bytes:
         advs = report.get("dooh_advantages", []) or []
         if advs:
             adv_cells = [
-                Paragraph(f"<b><font color='#1A2E58'>{a.get('title','')}</font></b><br/>"
+                Paragraph(f"<b><font color='#0A2240'>{a.get('title','')}</font></b><br/>"
                           f"<font size=8.3 color='#68798c'>{a.get('detail','')}</font>", st["cell"])
                 for a in advs
             ]
@@ -875,7 +907,7 @@ def build_report_pdf(report: dict, firm: str) -> bytes:
             tbl.setStyle(TableStyle(style))
             story.append(tbl)
             story.append(Spacer(1, 10))
-            content_w = doc_width = 6.9 * inch
+            content_w = 6.9 * inch
             story.append(BridgeDiagram(content_w))
 
         # --- What to Expect (outcomes) ---
@@ -1170,7 +1202,7 @@ def build_report_pdf(report: dict, firm: str) -> bytes:
         doc = SimpleDocTemplate(buffer, pagesize=letter, title=f"{firm} Legal Conquesting Plan",
                                 leftMargin=0.6 * inch, rightMargin=0.6 * inch,
                                 topMargin=0.6 * inch, bottomMargin=0.6 * inch)
-        doc.build(story)
+        doc.build(story, onFirstPage=_pdf_footer, onLaterPages=_pdf_footer)
         return buffer.getvalue()
     except Exception:
         app.logger.exception("PDF generation failed")
@@ -1224,6 +1256,71 @@ def upload_pdf_to_cloudinary(pdf_bytes: bytes, firm: str):
     }
 
 
+# ---------------------------------------------------------------------------
+# Local PDF fallback — used only when Cloudinary is unconfigured/fails, so the
+# on-screen "Download PDF" button still works.
+# NOTE: this store is per-worker, in-memory only. With multiple gunicorn workers
+# a /pdf/<id> request can land on a worker that didn't generate the file, and
+# everything is lost on restart/redeploy. It's a graceful fallback, not storage —
+# configure CLOUDINARY_URL for durable hosted PDFs.
+# ---------------------------------------------------------------------------
+_LOCAL_PDF_TTL = 6 * 3600  # seconds
+_local_pdfs: dict = {}     # report_id -> (pdf_bytes, created_ts)
+_local_pdfs_lock = threading.Lock()
+
+
+def _store_local_pdf(pdf_bytes: bytes) -> str:
+    report_id = uuid.uuid4().hex
+    now = time.time()
+    with _local_pdfs_lock:
+        # Simple TTL cleanup on each insert.
+        for k in [k for k, (_, ts) in _local_pdfs.items() if now - ts > _LOCAL_PDF_TTL]:
+            _local_pdfs.pop(k, None)
+        _local_pdfs[report_id] = (pdf_bytes, now)
+    return report_id
+
+
+@app.get("/pdf/<report_id>")
+def serve_local_pdf(report_id: str):
+    with _local_pdfs_lock:
+        item = _local_pdfs.get(report_id)
+    if not item or time.time() - item[1] > _LOCAL_PDF_TTL:
+        return jsonify({"ok": False, "error": "Report not found or expired."}), 404
+    return send_file(io.BytesIO(item[0]), mimetype="application/pdf",
+                     as_attachment=False, download_name=f"{REPORT_NAME}.pdf")
+
+
+def _report_json_str(report: dict) -> str:
+    """Serialize the report for the webhook, guaranteed to remain valid JSON.
+
+    A blind [:60000] slice could cut mid-token and break downstream parsing, so we
+    only send the full string when it fits, otherwise progressively drop the
+    heaviest sections and re-serialize."""
+    full = json.dumps(report, separators=(",", ":"))
+    if len(full) <= 60000:
+        return full
+    trimmed = dict(report)
+    for key in ("geofence_locations", "monthly_plan", "how_it_works", "dooh_advantages",
+                "creative_tips", "expected_outcomes"):
+        trimmed.pop(key, None)
+        s = json.dumps(trimmed, separators=(",", ":"))
+        if len(s) <= 60000:
+            return s
+    return json.dumps({
+        "note": "report exceeded webhook size limit; sections omitted",
+        "market_summary": str(report.get("market_summary", ""))[:2000],
+    })
+
+
+def _post_webhook(body: dict) -> None:
+    if not WEBHOOK_URL:
+        return
+    try:
+        requests.post(WEBHOOK_URL, json=body, timeout=12)
+    except requests.RequestException:
+        app.logger.exception("Webhook delivery failed")
+
+
 def send_webhook(payload: dict, report: Any, status: str, pdf_url: str = "",
                  download_url: str = "", public_id: str = "") -> None:
     if not WEBHOOK_URL:
@@ -1255,12 +1352,9 @@ def send_webhook(payload: dict, report: Any, status: str, pdf_url: str = "",
         "report_pdf_url": pdf_url,
         "report_pdf_download_url": download_url or pdf_url,
         "report_pdf_public_id": public_id,
-        "report_json": json.dumps(report, separators=(",", ":"))[:60000],
+        "report_json": _report_json_str(report),
     }
-    try:
-        requests.post(WEBHOOK_URL, json=body, timeout=12)
-    except requests.RequestException:
-        app.logger.exception("Webhook delivery failed")
+    _post_webhook(body)
 
 
 def send_webhook_async(payload: dict, report: Any, status: str, pdf_url: str = "",
@@ -1287,6 +1381,52 @@ QUEUED_MESSAGE = (
     "You're all set — we have your information and your market plan is being finished right now. "
     "The full proposal will be emailed to you shortly, and a Smart 1 strategist will follow up."
 )
+
+
+@app.post("/api/partial-lead")
+def partial_lead():
+    """Partial lead capture (SPEC §3): fired by the client when the user advances past
+    the firm/market step or abandons the page. No email or ZIP requirement — salvage
+    whatever came in. Always responds {ok:true}."""
+    raw = request.get_json(silent=True) or {}
+
+    # Honeypot: bots fill the hidden "fax" field. Pretend success; never forward.
+    if str(raw.get("fax", "")).strip():
+        return jsonify({"ok": True})
+
+    # Light, SEPARATE rate limit — must never consume the /api/analyze budget.
+    if _rate_limited(_client_ip(), _partial_rate_buckets, PARTIAL_RATE_LIMIT_MAX, RATE_LIMIT_WINDOW):
+        return jsonify({"ok": True})
+
+    fields = [
+        "lead_id",
+        "practice_area",
+        "secondary_practice_areas",
+        "firm_name",
+        "website",
+        "firm_zip",
+        "target_radius",
+        "primary_goal",
+        "notes",
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_term",
+        "utm_content",
+        "gclid",
+        "fbclid",
+        "referrer_url",
+        "landing_page_url",
+    ]
+    body = {k: str(raw.get(k, "")).strip()[:1500] for k in fields}
+    # Need at least something identifying to be worth forwarding.
+    if not body["website"] and not body["firm_name"]:
+        return jsonify({"ok": True})
+    body["source"] = "Smart 1 Legal Conquesting Market Intelligence"
+    body["report_status"] = "partial"
+    # Fire-and-forget (same pattern as send_webhook_async) so the beacon returns fast.
+    threading.Thread(target=_post_webhook, args=(body,), daemon=True).start()
+    return jsonify({"ok": True})
 
 
 @app.post("/api/analyze")
@@ -1329,6 +1469,12 @@ def analyze():
     pdf_info = upload_pdf_to_cloudinary(pdf_bytes, firm) or {}
     pdf_url = pdf_info.get("url", "")
     download_url = pdf_info.get("download_url", "")
+    if pdf_bytes and not pdf_url:
+        # Cloudinary unconfigured or upload failed — serve the PDF from this process
+        # so the on-screen download button still works (see _local_pdfs note above).
+        local_id = _store_local_pdf(pdf_bytes)
+        pdf_url = request.host_url.rstrip("/") + f"/pdf/{local_id}"
+        download_url = pdf_url
     send_webhook_async(payload, report, "completed", pdf_url, download_url, pdf_info.get("public_id", ""))
     return jsonify({
         "ok": True,
