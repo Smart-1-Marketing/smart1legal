@@ -1433,7 +1433,11 @@ def health():
         "lead_delivery": {
             "webhook_configured": bool(WEBHOOK_URL),
             "log": lead_store.leads_path(),
-            "owed": len(lead_store.unsent()),
+            # Named for what it actually counts -- see the note below.
+            "owed_local": len(lead_store.unsent()),
+            "owed_note": ("counted from this container's own log, which does not survive "
+                          "a restart or an idle spin-down; run replay_failed.py "
+                          "--from-cloudinary for the durable count"),
         },
         "detail": ("" if WEBHOOK_URL else
                    "GHL_WEBHOOK_URL is not set. Leads are being recorded and can be "
