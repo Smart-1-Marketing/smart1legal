@@ -9,6 +9,8 @@ from collections import defaultdict, deque
 from typing import Any
 
 import requests
+
+import lead_store
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request, send_file
 
@@ -1312,19 +1314,59 @@ def _report_json_str(report: dict) -> str:
     })
 
 
-def _post_webhook(body: dict) -> None:
+def _post_webhook(body: dict, kind: str = "lead") -> dict:
+    """Write the lead down, then try to deliver it. Returns what happened.
+
+    Every route reaches the CRM through here -- send_webhook, its async wrapper
+    and the partial-lead beacon -- so this is the one place the record has to be
+    written, and the one place the three silent failures had to be closed: an
+    unset GHL_WEBHOOK_URL returning early, a caught timeout leaving nothing
+    behind, and a POST whose status was never read, so a URL with a typo in it
+    answered 404 and the lead read as delivered.
+    """
+    return _deliver(body, _record_lead(body, kind))
+
+
+def _record_lead(body: dict, kind: str = "lead") -> dict:
+    """Write the lead down. Always called on the request thread.
+
+    The report is left out: large, regenerable, already on Cloudinary, and the
+    one field that would push a log line past the size that keeps an append
+    from tearing. Everything a replay needs to rebuild the contact is kept.
+    """
+    return lead_store.record({k: v for k, v in body.items() if k != "report_json"},
+                             kind=kind)
+
+
+def _deliver(body: dict, row: dict) -> dict:
+    """Try to hand an already-recorded lead to the CRM, and mark what happened."""
     if not WEBHOOK_URL:
-        return
+        lead_store.mark(row, "failed: GHL_WEBHOOK_URL is not set")
+        return {"recorded": True, "delivered": False, "lead_id": row.get("lead_id")}
     try:
-        requests.post(WEBHOOK_URL, json=body, timeout=12)
-    except requests.RequestException:
+        resp = requests.post(WEBHOOK_URL, json=body, timeout=12)
+    except requests.RequestException as exc:
         app.logger.exception("Webhook delivery failed")
+        lead_store.mark(row, f"failed: {exc.__class__.__name__}")
+        return {"recorded": True, "delivered": False, "lead_id": row.get("lead_id")}
+    if resp.status_code >= 400:
+        app.logger.error("Webhook rejected the lead: HTTP %s %s",
+                         resp.status_code, (resp.text or "")[:300])
+        lead_store.mark(row, f"failed: HTTP {resp.status_code}")
+        return {"recorded": True, "delivered": False, "lead_id": row.get("lead_id")}
+    lead_store.mark(row, "sent", http_status=resp.status_code)
+    return {"recorded": True, "delivered": True, "lead_id": row.get("lead_id")}
 
 
 def send_webhook(payload: dict, report: Any, status: str, pdf_url: str = "",
-                 download_url: str = "", public_id: str = "") -> None:
-    if not WEBHOOK_URL:
-        return
+                 download_url: str = "", public_id: str = "") -> dict:
+    """Build the CRM body, record the lead, and deliver it -- all synchronously."""
+    body = _build_body(payload, report, status, pdf_url, download_url, public_id)
+    return _post_webhook(body)
+
+
+def _build_body(payload: dict, report: Any, status: str, pdf_url: str = "",
+                download_url: str = "", public_id: str = "") -> dict:
     report = report or {}
     mp = report.get("market_profile", {}) or {}
     rp = report.get("recommended_package", {}) or {}
@@ -1354,17 +1396,23 @@ def send_webhook(payload: dict, report: Any, status: str, pdf_url: str = "",
         "report_pdf_public_id": public_id,
         "report_json": _report_json_str(report),
     }
-    _post_webhook(body)
+    return body
 
 
 def send_webhook_async(payload: dict, report: Any, status: str, pdf_url: str = "",
-                       download_url: str = "", public_id: str = "") -> None:
-    """Fire-and-forget webhook post so the API response never waits on GHL."""
-    threading.Thread(
-        target=send_webhook,
-        args=(payload, report, status, pdf_url, download_url, public_id),
-        daemon=True,
-    ).start()
+                       download_url: str = "", public_id: str = "") -> dict:
+    """Record on this thread; hand only the POST to a daemon thread.
+
+    The response still never waits on GoHighLevel, which is what this wrapper
+    was for. What changed is that the lead is written down before the thread is
+    spawned rather than inside it -- a daemon thread dies with the process, so
+    recording in there left a window in which a lead vanished with no trace at
+    all, which is the exact failure the write-ahead record exists to close.
+    """
+    body = _build_body(payload, report, status, pdf_url, download_url, public_id)
+    row = _record_lead(body)
+    threading.Thread(target=_deliver, args=(body, row), daemon=True).start()
+    return {"recorded": True, "delivered": None, "lead_id": row.get("lead_id")}
 
 
 @app.get("/")
@@ -1374,7 +1422,23 @@ def index():
 
 @app.get("/health")
 def health():
-    return jsonify({"status": "ok", "service": "smart1legal"})
+    """Whether this app can do its job, not merely whether it booted.
+
+    It answered "ok" with no webhook configured -- the one state in which every
+    lead it takes is undeliverable.
+    """
+    return jsonify({
+        "status": "ok" if WEBHOOK_URL else "degraded",
+        "service": "smart1legal",
+        "lead_delivery": {
+            "webhook_configured": bool(WEBHOOK_URL),
+            "log": lead_store.leads_path(),
+            "owed": len(lead_store.unsent()),
+        },
+        "detail": ("" if WEBHOOK_URL else
+                   "GHL_WEBHOOK_URL is not set. Leads are being recorded and can be "
+                   "replayed with replay_failed.py once one is."),
+    })
 
 
 QUEUED_MESSAGE = (
@@ -1425,7 +1489,8 @@ def partial_lead():
     body["source"] = "Smart 1 Legal Conquesting Market Intelligence"
     body["report_status"] = "partial"
     # Fire-and-forget (same pattern as send_webhook_async) so the beacon returns fast.
-    threading.Thread(target=_post_webhook, args=(body,), daemon=True).start()
+    row = _record_lead(body, "partial")
+    threading.Thread(target=_deliver, args=(body, row), daemon=True).start()
     return jsonify({"ok": True})
 
 
